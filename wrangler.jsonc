@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "a2a-x402-demo",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  "rules": [
+    { "type": "Text", "globs": ["**/*.html"], "fallthrough": true }
+  ],
+
+  "durable_objects": {
+    "bindings": [{ "name": "A2A_STATE", "class_name": "A2AState" }]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["A2AState"] }
+  ],
+
+  "vars": {
+    "X402_NETWORK": "base-sepolia",
+    "X402_ASSET": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "X402_PAY_TO": "0xc7314519873997A7A105Cbd9f4c1A17d3CeD6e8c",
+    "X402_PRICE_ATOMIC": "1000",
+    "X402_ASSET_NAME": "USDC",
+    "X402_ASSET_VERSION": "2",
+    "X402_FACILITATOR_URL": "https://x402.org/facilitator",
+    "FACILITATOR_MODE": "mock",
+    "AGENT_CARD_KID": "hubble-demo-card-key-2026",
+    "AGENT_CARD_PUBLIC_JWK": "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xycIlnkOhs0AK0kwV5QsSfSifMzMD60ZXslxW_S4wK4\",\"y\":\"o88VZETnbU1ETDJensLcLgcEFdujhgdjNQuDSB85e9c\"}"
+  }
+}

@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>A2A + x402 Demo — wallet auth, replay guard, paid task execution</title>
+<style>
+  :root{
+    --bg:#0B1120; --panel:#111A2E; --line:#1E2A44; --ink:#E8EEF9; --sub:#93A3BC;
+    --cyan:#22D3EE; --ok:#34D399; --warn:#F0A73A; --bad:#F06B7A; --violet:#A78BFA; --blue:#4B8DF8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,Inter,"Helvetica Neue",Arial,sans-serif;line-height:1.55}
+  header{padding:44px 40px 26px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 8px;font-size:34px;letter-spacing:-.5px}
+  .lead{margin:0;color:var(--sub);font-size:16px;max-width:1000px}
+  .badges{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+  .badge{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;
+         border:1px solid var(--line);background:var(--panel);font-size:13.5px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--sub)}
+  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
+  main{padding:28px 40px 70px;display:grid;grid-template-columns:minmax(340px,1fr) minmax(460px,1.35fr);
+       gap:24px;align-items:start}
+  @media (max-width:1100px){main{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+  .panel h2{margin:0 0 16px;font-size:16px;letter-spacing:.4px;text-transform:uppercase;color:var(--sub);font-weight:700}
+  .btns{display:flex;flex-direction:column;gap:10px}
+  button{appearance:none;border:1px solid var(--line);background:#0E1729;color:var(--ink);
+         border-radius:10px;padding:13px 16px;font-size:14.5px;text-align:left;cursor:pointer;
+         transition:border-color .15s,transform .05s}
+  button:hover{border-color:var(--cyan)} button:active{transform:translateY(1px)}
+  button:disabled{opacity:.45;cursor:progress}
+  button b{color:var(--cyan);margin-right:10px}
+  pre{margin:0;background:#080E1B;border:1px solid var(--line);border-radius:10px;padding:14px;
+      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:#BFD0E8;
+      max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+  #log{display:flex;flex-direction:column;gap:10px;max-height:620px;overflow:auto}
+  .step{border:1px solid var(--line);border-left:3px solid var(--sub);border-radius:8px;padding:11px 14px;
+        background:#0C1526;font-size:13.5px}
+  .step .t{font-weight:700;margin-bottom:3px}
+  .step .d{color:var(--sub);font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word}
+  .step.ok{border-left-color:var(--ok)} .step.ok .t{color:var(--ok)}
+  .step.warn{border-left-color:var(--warn)} .step.warn .t{color:var(--warn)}
+  .step.bad{border-left-color:var(--bad)} .step.bad .t{color:var(--bad)}
+  .step.info{border-left-color:var(--blue)} .step.info .t{color:var(--blue)}
+  .step.pay{border-left-color:var(--violet)} .step.pay .t{color:var(--violet)}
+  a{color:var(--cyan)} code{font-family:ui-monospace,Menlo,monospace;color:var(--violet)}
+  .hint{color:var(--sub);font-size:13px;margin-top:14px}
+</style>
+</head>
+<body>
+<header>
+  <h1>A2A Protocol · Wallet Auth · x402 Paid Execution</h1>
+  <p class="lead">
+    A live Cloudflare Worker that speaks the Agent-to-Agent protocol. Requests are authenticated with an
+    <b>EIP-191 wallet signature</b>, protected against replay by a <b>UNIQUE(caller, nonce)</b> constraint in a
+    Durable Object, and paid for with an <b>x402 HTTP 402 challenge</b> on Base Sepolia.
+    Every scenario below runs against the real endpoints from your browser.
+  </p>
+  <div class="badges">
+    <span class="badge"><span class="dot" id="cardDot"></span><span id="cardBadge">checking card signature…</span></span>
+    <span class="badge"><span class="dot ok"></span><span>JSON-RPC · /api/v1/a2a/jsonrpc</span></span>
+    <span class="badge"><span class="dot ok"></span><span>network · <span id="netBadge">base-sepolia</span></span></span>
+    <span class="badge"><span class="dot"></span><span>mode · <span id="modeBadge">…</span></span></span>
+  </div>
+  <p class="hint">
+    <a href="/.well-known/agent-card.json">/.well-known/agent-card.json</a> ·
+    <a href="/.well-known/jwks.json">/.well-known/jwks.json</a> ·
+    <a href="/api/v1/a2a/state-machine">/api/v1/a2a/state-machine</a> ·
+    <a href="/api/v1/a2a/stats">/api/v1/a2a/stats</a>
+  </p>
+</header>
+
+<main>
+  <div>
+    <section class="panel">
+      <h2>Scenarios</h2>
+      <div class="btns">
+        <button id="btnFree"><b>1</b>Free task — signed request, no payment</button>
+        <button id="btnPaid"><b>2</b>Paid task — 402 challenge → pay → result</button>
+        <button id="btnReplay"><b>3</b>Replay attack — reuse the same nonce</button>
+        <button id="btnTamper"><b>4</b>Tampered signature — flip one character</button>
+        <button id="btnBadMoney"><b>5</b>Underpaid authorization — below the required amount</button>
+        <button id="btnReset"><b>0</b>Reset the log</button>
+      </div>
+      <p class="hint">
+        Your browser generates a throwaway secp256k1 key on first use and keeps it in localStorage.
+        Nothing is sent anywhere except this Worker.
+      </p>
+    </section>
+
+    <section class="panel" style="margin-top:24px">
+      <h2>Agent Card (JWS-signed)</h2>
+      <pre id="cardJson">loading…</pre>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Timeline</h2>
+    <div id="log"></div>
+  </section>
+</main>
+
+<script type="module">
+import { generatePrivateKey, privateKeyToAccount } from "https://esm.sh/viem@2.45.0/accounts";
+
+const $ = (id) => document.getElementById(id);
+const log = $("log");
+let account = null;
+
+function addStep(kind, title, detail) {
+  const el = document.createElement("div");
+  el.className = "step " + kind;
+  el.innerHTML = `<div class="t"></div><div class="d"></div>`;
+  el.querySelector(".t").textContent = title;
+  el.querySelector(".d").textContent = detail ?? "";
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+const clearLog = () => { log.innerHTML = ""; };
+const short = (s, n = 22) => (s && s.length > n ? s.slice(0, n) + "…" : s);
+const iso = () => new Date().toISOString();
+
+function wallet() {
+  if (account) return account;
+  let pk = localStorage.getItem("a2a_demo_pk");
+  if (!pk) { pk = generatePrivateKey(); localStorage.setItem("a2a_demo_pk", pk); }
+  account = privateKeyToAccount(pk);
+  return account;
+}
+
+/** Canonical JSON: keys sorted recursively, no whitespace — must match the Worker. */
+function stableStringify(v) {
+  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
+  if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
+  return "{" + Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + stableStringify(v[k])).join(",") + "}";
+}
+
+/** Builds the four X-A2A-* headers for one JSON-RPC call. */
+async function signedHeaders(acct, method, id, params) {
+  const nonce = "0x" + crypto.getRandomValues(new Uint8Array(16)).reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+  const timestamp = iso();
+  const canonicalParams = params === undefined || params === null ? "{}" : stableStringify(params);
+  const message = `${method}:${String(id)}:${timestamp}:${nonce}:${canonicalParams}`;
+  const signature = await acct.signMessage({ message });
+  return {
+    headers: {
+      "content-type": "application/json",
+      "X-A2A-CALLER": acct.address,
+      "X-A2A-NONCE": nonce,
+      "X-A2A-TIMESTAMP": timestamp,
+      "X-A2A-SIGNATURE": signature,
+    },
+    message, nonce, timestamp, signature,
+  };
+}
+
+async function rpc(method, params, opts = {}) {
+  const acct = opts.account ?? wallet();
+  const id = opts.id ?? Math.floor(Math.random() * 1e6);
+  let signed = opts.reuse ?? await signedHeaders(acct, method, id, params);
+  if (opts.tamper) {
+    let sig = signed.headers["X-A2A-SIGNATURE"];
+    const last = sig.slice(-1);
+    sig = sig.slice(0, -1) + (last === "a" ? "b" : "a");
+    signed = { ...signed, headers: { ...signed.headers, "X-A2A-SIGNATURE": sig } };
+  }
+  const res = await fetch("/api/v1/a2a/jsonrpc", {
+    method: "POST", headers: signed.headers,
+    body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+  });
+  const body = await res.json().catch(() => null);
+  return { status: res.status, body, signed, id };
+}
+
+// ---------------------------------------------------------------- card badge
+async function initCard() {
+  const [cardRes, verifyRes, statsRes] = await Promise.all([
+    fetch("/.well-known/agent-card.json"),
+    fetch("/api/v1/a2a/verify-card"),
+    fetch("/api/v1/a2a/stats"),
+  ]);
+  const card = await cardRes.json();
+  const verify = await verifyRes.json();
+  const stats = await statsRes.json();
+  $("cardJson").textContent = JSON.stringify(card, null, 2);
+  $("cardDot").className = "dot " + (verify.valid ? "ok" : "bad");
+  $("cardBadge").textContent = verify.valid
+    ? `card signature verified (${verify.alg} · kid ${verify.kid})`
+    : "card signature NOT verified";
+  $("modeBadge").textContent = stats.facilitator_mode === "live" ? "live facilitator" : "mock facilitator (always completes)";
+  $("netBadge").textContent = card.additionalInterfaces?.[0]?.url ? "base-sepolia" : "base-sepolia";
+}
+
+// ---------------------------------------------------------------- scenarios
+async function scenarioFree() {
+  const acct = wallet();
+  addStep("info", "Free task · signed request", `caller ${acct.address}`);
+  const r = await rpc("tasks/create", { skill: "ping", input: { echo: "hello from the demo page" } });
+  addStep(r.status === 200 ? "ok" : "bad", `HTTP ${r.status}`, JSON.stringify(r.body, null, 2));
+}
+
+async function scenarioPaid() {
+  const acct = wallet();
+  const input = { symbol: "BTC", price: 68000, change24h: 2.4 };
+  addStep("info", "Paid task · phase A — call with no payment", `caller ${acct.address}`);
+
+  const first = await rpc("tasks/create", { skill: "market_summary", input });
+  if (first.status !== 402) { addStep("bad", `expected 402, got ${first.status}`, JSON.stringify(first.body)); return; }
+  const info = first.body?.error?.data;
+  const req = info?.requirements;
+  addStep("pay", "HTTP 402 Payment Required", `code ${first.body.error.code} · ${first.body.error.message}`);
+  addStep("info", "Payment requirements", JSON.stringify(req, null, 2));
+
+  // Build and sign a real EIP-3009 TransferWithAuthorization for USDC.
+  const chainId = req.network === "base" ? 8453 : 84532;
+  const now = Math.floor(Date.now() / 1000);
+  const auth = {
+    from: acct.address,
+    to: req.payTo,
+    value: BigInt(req.maxAmountRequired),
+    validAfter: BigInt(now - 600),
+    validBefore: BigInt(now + 3600),
+    nonce: "0x" + crypto.getRandomValues(new Uint8Array(32)).reduce((s, b) => s + b.toString(16).padStart(2, "0"), ""),
+  };
+  const signature = await acct.signTypedData({
+    domain: { name: req.extra.name, version: req.extra.version, chainId, verifyingContract: req.asset },
+    types: { TransferWithAuthorization: [
+      { name: "from", type: "address" }, { name: "to", type: "address" },
+      { name: "value", type: "uint256" }, { name: "validAfter", type: "uint256" },
+      { name: "validBefore", type: "uint256" }, { name: "nonce", type: "bytes32" } ] },
+    primaryType: "TransferWithAuthorization",
+    message: auth,
+  });
+  addStep("ok", "Signed EIP-3009 authorization", `from ${short(acct.address)} → ${short(req.payTo)}\nvalue ${req.maxAmountRequired} atomic USDC · chainId ${chainId}`);
+
+  const payload = {
+    x402Version: 1, scheme: "exact", network: req.network,
+    payload: { signature, authorization: {
+      from: auth.from, to: auth.to, value: auth.value.toString(),
+      validAfter: auth.validAfter.toString(), validBefore: auth.validBefore.toString(), nonce: auth.nonce } },
+  };
+  addStep("info", "Paid task · phase B — replay with X-PAYMENT", `payment_id ${info.payment_id}`);
+  const second = await rpc("tasks/create", {
+    skill: "market_summary", input,
+    payment: { payment_id: info.payment_id, task_id: info.task_id, payload },
+  });
+  addStep(second.status === 200 ? "ok" : "bad", `HTTP ${second.status}`, JSON.stringify(second.body, null, 2));
+}
+
+async function scenarioReplay() {
+  const acct = wallet();
+  addStep("info", "Replay attack · one signed request, sent twice", `caller ${acct.address}`);
+  const params = { skill: "ping", input: { echo: "replay me" } };
+  const id = Math.floor(Math.random() * 1e6);
+  const signed = await signedHeaders(acct, "tasks/create", id, params);
+  const first = await rpc("tasks/create", params, { account: acct, id, reuse: signed });
+  addStep(first.status === 200 ? "ok" : "bad", `first send → HTTP ${first.status}`, `nonce ${short(signed.nonce)}`);
+  const again = await rpc("tasks/create", params, { account: acct, id, reuse: signed });
+  addStep(again.status === 409 ? "ok" : "bad", `replay → HTTP ${again.status}`,
+    JSON.stringify(again.body?.error ?? again.body, null, 2));
+}
+
+async function scenarioTamper() {
+  const acct = wallet();
+  addStep("info", "Tampered signature · one character flipped", `caller ${acct.address}`);
+  const r = await rpc("tasks/create", { skill: "ping", input: { echo: "tampered" } }, { tamper: true });
+  addStep(r.status === 401 ? "ok" : "bad", `HTTP ${r.status}`, JSON.stringify(r.body?.error ?? r.body, null, 2));
+}
+
+async function scenarioUnderpaid() {
+  const acct = wallet();
+  const input = { symbol: "ETH", price: 3200, change24h: -3.1 };
+  addStep("info", "Underpaid authorization · below the required amount", `caller ${acct.address}`);
+  const first = await rpc("tasks/create", { skill: "market_summary", input });
+  if (first.status !== 402) { addStep("bad", `expected 402, got ${first.status}`, ""); return; }
+  const info = first.body.error.data;
+  const req = info.requirements;
+  const under = BigInt(req.maxAmountRequired) / 2n;
+  const now = Math.floor(Date.now() / 1000);
+  const auth = {
+    from: acct.address, to: req.payTo, value: under,
+    validAfter: BigInt(now - 600), validBefore: BigInt(now + 3600),
+    nonce: "0x" + crypto.getRandomValues(new Uint8Array(32)).reduce((s, b) => s + b.toString(16).padStart(2, "0"), ""),
+  };
+  const signature = await acct.signTypedData({
+    domain: { name: req.extra.name, version: req.extra.version, chainId: 84532, verifyingContract: req.asset },
+    types: { TransferWithAuthorization: [
+      { name: "from", type: "address" }, { name: "to", type: "address" },
+      { name: "value", type: "uint256" }, { name: "validAfter", type: "uint256" },
+      { name: "validBefore", type: "uint256" }, { name: "nonce", type: "bytes32" } ] },
+    primaryType: "TransferWithAuthorization", message: auth,
+  });
+  addStep("warn", `Authorized only ${under.toString()} atomic (required ${req.maxAmountRequired})`, "");
+  const second = await rpc("tasks/create", {
+    skill: "market_summary", input,
+    payment: { payment_id: info.payment_id, task_id: info.task_id,
+      payload: { x402Version: 1, scheme: "exact", network: req.network,
+        payload: { signature, authorization: { from: auth.from, to: auth.to, value: auth.value.toString(),
+          validAfter: auth.validAfter.toString(), validBefore: auth.validBefore.toString(), nonce: auth.nonce } } } },
+  });
+  addStep(second.status === 402 ? "ok" : "bad", `HTTP ${second.status}`, JSON.stringify(second.body?.error ?? second.body, null, 2));
+}
+
+const bind = (id, fn) => $(id).addEventListener("click", async (e) => {
+  const b = e.currentTarget; b.disabled = true;
+  try { await fn(); } catch (err) { addStep("bad", "client error", String(err?.message ?? err)); }
+  finally { b.disabled = false; }
+});
+
+bind("btnFree", scenarioFree);
+bind("btnPaid", scenarioPaid);
+bind("btnReplay", scenarioReplay);
+bind("btnTamper", scenarioTamper);
+bind("btnBadMoney", scenarioUnderpaid);
+bind("btnReset", async () => { clearLog(); addStep("info", "log cleared", ""); });
+
+initCard().then(() => addStep("info", "ready", "Pick a scenario on the left. Each one hits the live Worker."))
+          .catch((e) => addStep("bad", "init failed", String(e)));
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "name": "a2a-x402-demo",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Minimal A2A protocol + wallet auth + x402 paid execution demo on Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.9.0",
+    "viem": "^2.45.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261006.1",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.68.0"
+  },
+  "allowScripts": {
+    "workerd@1.20261006.1": true,
+    "esbuild@0.28.2": true
+  }
+}
