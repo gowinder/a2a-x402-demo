@@ -21,6 +21,7 @@ export interface PaymentRow {
   payer: string | null;
   requirements: string;
   tx_hash: string | null;
+  server_signed?: number;
   created_at: number;
   updated_at: number;
 }
@@ -41,6 +42,8 @@ export class A2AState extends DurableObject<Env> {
         id TEXT PRIMARY KEY, status TEXT NOT NULL, payer TEXT,
         requirements TEXT NOT NULL, payload TEXT, tx_hash TEXT,
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
+      // demo-only marker: this payment was signed server-side by the funded demo wallet
+      try { sql.exec(`ALTER TABLE payments ADD COLUMN server_signed INTEGER NOT NULL DEFAULT 0`); } catch {}
       sql.exec(`CREATE TABLE IF NOT EXISTS rate (
         bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL)`);
     });
@@ -130,6 +133,10 @@ export class A2AState extends DurableObject<Env> {
   async getPayment(id: string): Promise<PaymentRow | null> {
     const rows = this.ctx.storage.sql.exec(`SELECT * FROM payments WHERE id = ?`, id).toArray();
     return ((rows[0] as unknown) as PaymentRow) ?? null;
+  }
+
+  async markServerSigned(id: string): Promise<void> {
+    this.ctx.storage.sql.exec(`UPDATE payments SET server_signed = 1 WHERE id = ?`, id);
   }
 
   async setPaymentStatus(id: string, status: PaymentRow["status"], payer: string | null, txHash: string | null): Promise<void> {

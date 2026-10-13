@@ -108,6 +108,7 @@ import { generatePrivateKey, privateKeyToAccount } from "https://esm.sh/viem@2.4
 const $ = (id) => document.getElementById(id);
 const log = $("log");
 let account = null;
+let LIVE_MODE = false;
 
 function addStep(kind, title, detail) {
   const el = document.createElement("div");
@@ -189,7 +190,8 @@ async function initCard() {
   $("cardBadge").textContent = verify.valid
     ? `card signature verified (${verify.alg} · kid ${verify.kid})`
     : "card signature NOT verified";
-  $("modeBadge").textContent = stats.facilitator_mode === "live" ? "live facilitator" : "mock facilitator (always completes)";
+  LIVE_MODE = stats.facilitator_mode === "live";
+  $("modeBadge").textContent = LIVE_MODE ? "LIVE · real USDC settlement on Base Sepolia" : "mock facilitator (always completes)";
   $("netBadge").textContent = card.additionalInterfaces?.[0]?.url ? "base-sepolia" : "base-sepolia";
 }
 
@@ -213,6 +215,29 @@ async function scenarioPaid() {
   addStep("pay", "HTTP 402 Payment Required", `code ${first.body.error.code} · ${first.body.error.message}`);
   addStep("info", "Payment requirements", JSON.stringify(req, null, 2));
 
+  // In LIVE mode the funded wallet lives on the server, so ask it to sign.
+  // In mock mode the browser signs with its own throwaway key.
+  let payload;
+  if (LIVE_MODE) {
+    addStep("info", "Requesting a server-signed payment payload", "the funded demo wallet signs; no private key reaches your browser");
+    const pr = await fetch("/api/v1/a2a/demo-pay", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payment_id: info.payment_id }),
+    });
+    const pj = await pr.json().catch(() => null);
+    if (!pr.ok) { addStep("bad", `demo-pay failed (HTTP ${pr.status})`, JSON.stringify(pj)); return; }
+    payload = pj.payload;
+    addStep("ok", "Server-signed EIP-3009 authorization",
+      `payer ${short(pj.payer)} → ${short(pj.pay_to)}\nvalue ${pj.amount_atomic} atomic USDC · network ${pj.network}`);
+    addStep("pay", "Submitting to the live facilitator", "POST https://x402.org/facilitator/verify then /settle — a real Base Sepolia transaction");
+    const second = await rpc("tasks/create", {
+      skill: "market_summary", input,
+      payment: { payment_id: info.payment_id, task_id: info.task_id, payload },
+    });
+    addStep(second.status === 200 ? "ok" : "bad", `HTTP ${second.status}`, JSON.stringify(second.body, null, 2));
+    return;
+  }
+
   // Build and sign a real EIP-3009 TransferWithAuthorization for USDC.
   const chainId = req.network === "base" ? 8453 : 84532;
   const now = Math.floor(Date.now() / 1000);
@@ -235,7 +260,7 @@ async function scenarioPaid() {
   });
   addStep("ok", "Signed EIP-3009 authorization", `from ${short(acct.address)} → ${short(req.payTo)}\nvalue ${req.maxAmountRequired} atomic USDC · chainId ${chainId}`);
 
-  const payload = {
+  payload = {
     x402Version: 1, scheme: "exact", network: req.network,
     payload: { signature, authorization: {
       from: auth.from, to: auth.to, value: auth.value.toString(),

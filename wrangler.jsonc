@@ -20,12 +20,12 @@
   "vars": {
     "X402_NETWORK": "base-sepolia",
     "X402_ASSET": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    "X402_PAY_TO": "0xc7314519873997A7A105Cbd9f4c1A17d3CeD6e8c",
+    "X402_PAY_TO": "0x2f0EeFEBC2417C669caCc4AC264cB4e7eC0E1a61",
     "X402_PRICE_ATOMIC": "1000",
     "X402_ASSET_NAME": "USDC",
     "X402_ASSET_VERSION": "2",
     "X402_FACILITATOR_URL": "https://x402.org/facilitator",
-    "FACILITATOR_MODE": "mock",
+    "FACILITATOR_MODE": "live",
     "AGENT_CARD_KID": "hubble-demo-card-key-2026",
     "AGENT_CARD_PUBLIC_JWK": "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xycIlnkOhs0AK0kwV5QsSfSifMzMD60ZXslxW_S4wK4\",\"y\":\"o88VZETnbU1ETDJensLcLgcEFdujhgdjNQuDSB85e9c\"}"
   }

@@ -16,6 +16,7 @@ import {
   randomHex, ALLOWED_TRANSITIONS, A2A_STATES,
   type Env, type A2AState as TaskState,
 } from "./lib";
+import { buildSignedPayload } from "./payer";
 import demoPageHtml from "./demo-page.html";
 
 export { A2AState };
@@ -86,6 +87,32 @@ app.get("/api/v1/a2a/state-machine", (c) =>
     allowed_transitions: ALLOWED_TRANSITIONS,
     note: "Illegal transitions are logged and rejected; they never raise.",
   }));
+
+// Server-side signing for the public demo: lets the page demonstrate a REAL
+// x402 settlement without shipping a funded private key to the browser.
+app.post("/api/v1/a2a/demo-pay", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const paymentId = String((body as any)?.payment_id ?? "");
+  const pay = await stub(c.env).getPayment(paymentId);
+  if (!pay) return c.json({ error: "unknown payment_id", payment_id: paymentId }, 404);
+  if (!c.env.X402_PAYER_KEY) {
+    return c.json({ error: "X402_PAYER_KEY is not configured on this deployment" }, 400);
+  }
+  try {
+    const requirements = JSON.parse(pay.requirements);
+    const { payload, payer } = await buildSignedPayload(c.env, requirements);
+    // Record that this payload came from the demo's own funded wallet, so the
+    // caller-ownership guard can be waived for exactly this case (and nothing else).
+    await stub(c.env).markServerSigned(paymentId);
+    return c.json({
+      payment_id: paymentId, payer, network: requirements.network,
+      amount_atomic: requirements.maxAmountRequired, pay_to: requirements.payTo,
+      payload, note: "signed server-side by the funded demo wallet",
+    });
+  } catch (e) {
+    return c.json({ error: `could not sign payment: ${(e as Error).message}` }, 500);
+  }
+});
 
 app.get("/api/v1/a2a/stats", async (c) => {
   const s = await stub(c.env).stats();
@@ -202,7 +229,10 @@ app.post("/api/v1/a2a/jsonrpc", async (c) => {
       reason: verdict.invalidReason, source: verdict.source,
     }), 402);
   }
-  if (verdict.payer && verdict.payer.toLowerCase() !== auth.caller.toLowerCase()) {
+  // Ownership guard: the payer must be the caller — except on the public demo path,
+  // where the payload is signed server-side by the funded demo wallet and the caller
+  // is a throwaway key generated in the visitor's browser.
+  if (!pay.server_signed && verdict.payer && verdict.payer.toLowerCase() !== auth.caller.toLowerCase()) {
     return c.json(rpcError(id, 42002, "Payer does not match the authenticated caller (ownership rejected)", {
       payer: verdict.payer, caller: auth.caller,
     }), 403);

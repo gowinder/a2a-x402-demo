@@ -87,8 +87,33 @@ amount/recipient/time-window prechecks.
 
 | `FACILITATOR_MODE` | Behaviour |
 |---|---|
-| `mock` | Simulates verify + settle so the public demo always completes |
-| `live` | Calls `https://x402.org/facilitator/verify` and `/settle` on Base Sepolia (no API key) |
+| `mock` | Simulates verify + settle so the flow always completes |
+| `live` | Calls `https://x402.org/facilitator/verify` and `/settle` on Base Sepolia (no API key) — **this deployment runs live** |
+
+#### Real settlement, verified on chain
+
+The public demo settles **real USDC on Base Sepolia**. Because a browser cannot hold a funded
+key safely, the payment authorization is signed **server-side** by
+`POST /api/v1/a2a/demo-pay`, using the funded wallet in the `X402_PAYER_KEY` secret. The
+private key never reaches the browser; the browser still signs its own EIP-191 caller
+authentication with a throwaway key.
+
+A verified settlement from this deployment:
+
+| | |
+|---|---|
+| Transaction | [`0x9bdc671e…ead502`](https://sepolia.basescan.org/tx/0x9bdc671e735c89ca257fe1b535cf69428aadcbe5bbc99af8235a4b3bc3ead502) |
+| Status | success, block 48053391, gas 102868 |
+| Token | USDC `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| Amount | 0.001 USDC (1000 atomic) |
+| Payer | `0xc7314519873997A7A105Cbd9f4c1A17d3CeD6e8c` → 19.999 USDC |
+| Payee | `0x2f0EeFEBC2417C669caCc4AC264cB4e7eC0E1a61` → 0.001 USDC |
+
+**One deliberate, documented exception:** the caller-ownership guard compares the payer with
+the authenticated caller. On the public demo those legitimately differ (server wallet vs.
+browser key), so `/demo-pay` marks the payment `server_signed = 1` and *only that* case skips
+the comparison. A payload signed by any other wallet is still rejected with `42002` — the
+guard was in fact what caught this during development.
 
 The live path is implemented and was validated against the real facilitator: with correct
 requirements but a dummy signature it returns `invalid_exact_evm_signature`, which is exactly the

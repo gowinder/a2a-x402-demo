@@ -17,6 +17,21 @@ function stableStringify(v) {
 }
 const randHex = (n) => "0x" + crypto.getRandomValues(new Uint8Array(n)).reduce((s,b)=>s+b.toString(16).padStart(2,"0"),"");
 
+// In live mode the funded wallet lives on the server, so payment payloads are
+// requested from /demo-pay (the browser key holds no USDC).
+const health = await (await fetch(`${BASE}/health`)).json();
+const LIVE = health.facilitator_mode === "live";
+async function paymentPayload(paymentId) {
+  if (!LIVE) return null;
+  const r = await fetch(`${BASE}/api/v1/a2a/demo-pay`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ payment_id: paymentId }),
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(`demo-pay failed: ${JSON.stringify(j)}`);
+  return j.payload;
+}
+
 async function signedHeaders(method, id, params, nonceOverride) {
   const nonce = nonceOverride ?? randHex(16);
   const timestamp = new Date().toISOString();
@@ -56,7 +71,7 @@ async function sign3009(req, valueOverride) {
       validAfter:auth.validAfter.toString(), validBefore:auth.validBefore.toString(), nonce:auth.nonce } } };
 }
 
-console.log(`\nA2A + x402 smoke test · caller ${acct.address}\nBASE=${BASE}\n`);
+console.log(`\nA2A + x402 smoke test · caller ${acct.address}\nBASE=${BASE} · MODE=${health.facilitator_mode}\n`);
 
 console.log("1) Agent Card");
 const card = await (await fetch(`${BASE}/.well-known/agent-card.json`)).json();
@@ -115,8 +130,9 @@ ok(badTo.status === 402, `HTTP 402 (got ${badTo.status}) · ${badTo.body?.error?
 
 await pause(1300);
 console.log("\n9) Paid skill — phase B, correct payment");
+const serverPayload = await paymentPayload(info.payment_id);
 const paid = await rpc("tasks/create", { skill:"market_summary", input,
-  payment:{ payment_id: info.payment_id, task_id: info.task_id, payload: await sign3009(req) } });
+  payment:{ payment_id: info.payment_id, task_id: info.task_id, payload: serverPayload ?? await sign3009(req) } });
 ok(paid.status === 200, `HTTP 200 (got ${paid.status})`);
 ok(paid.body?.result?.payment?.status === "confirmed", `payment status confirmed (source ${paid.body?.result?.payment?.source})`);
 ok(paid.body?.result?.task?.state === "succeeded", `task state ${paid.body?.result?.task?.state}`);
@@ -126,7 +142,7 @@ ok(typeof paid.body?.result?.task?.result?.bias === "string",
 await pause(1300);
 console.log("\n10) Double-spend the same payment_id");
 const dbl = await rpc("tasks/create", { skill:"market_summary", input,
-  payment:{ payment_id: info.payment_id, task_id: info.task_id, payload: await sign3009(req) } });
+  payment:{ payment_id: info.payment_id, task_id: info.task_id, payload: serverPayload ?? await sign3009(req) } });
 ok(dbl.status === 409, `HTTP 409 (got ${dbl.status}) · ${dbl.body?.error?.message}`);
 
 await pause(1300);
@@ -134,8 +150,9 @@ console.log("\n11) Payload substitution (pay for A, execute B)");
 const pa2 = await rpc("tasks/create", { skill:"market_summary", input:{ symbol:"ETH", price:3200, change24h:-5 } });
 ok(pa2.status === 402, `second payment_id issued (HTTP ${pa2.status})`);
 const info2 = pa2.body.error.data;
+const p2 = await paymentPayload(info2.payment_id);
 const subst = await rpc("tasks/create", { skill:"market_summary", input,
-  payment:{ payment_id: info2.payment_id, task_id: info2.task_id, payload: await sign3009(info2.requirements) } });
+  payment:{ payment_id: info2.payment_id, task_id: info2.task_id, payload: p2 ?? await sign3009(info2.requirements) } });
 ok(subst.status === 409, `HTTP 409 (got ${subst.status}) · ${subst.body?.error?.message}`);
 
 await pause(1300);

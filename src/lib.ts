@@ -13,6 +13,7 @@ export interface Env {
   AGENT_CARD_KID: string;
   AGENT_CARD_PUBLIC_JWK: string;
   AGENT_CARD_JWK?: string;
+  X402_PAYER_KEY?: string;
 }
 
 /**
